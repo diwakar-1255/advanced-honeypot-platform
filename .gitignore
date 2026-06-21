@@ -13,3 +13,4 @@ https-proxy/certs/
 *.tar.gz
 *.zip
 *.bak
+*.bak
