@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: honeypot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: honeypotdb
+      POSTGRES_USER: honeypot
+      POSTGRES_PASSWORD: honeypotpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: ./api
+    container_name: honeypot-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  web-honeypot:
+    build: ./web-honeypot
+    container_name: web-honeypot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+
+  ftp-honeypot:
+    build: ./ftp-honeypot
+    container_name: ftp-honeypot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "2121:2121"
+      - "30000-30009:30000-30009"
+    depends_on:
+      - api
+
+  nginx-https:
+    image: nginx:stable
+    container_name: honeypot-nginx-https
+    restart: unless-stopped
+    ports:
+      - "8443:443"
+    volumes:
+      - ./https-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./https-proxy/certs:/etc/nginx/certs:ro
+    depends_on:
+      - web-honeypot
+
+
+  ssh-honeypot:
+    build: ./ssh-honeypot
+    container_name: ssh-honeypot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "2222:2222"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: honeypot-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  grafana_data:

@@ -1,0 +1,14 @@
+﻿.env
+*.key
+*.pem
+*.crt
+*.log
+__pycache__/
+*.pyc
+postgres_data/
+grafana_data/
+cowrie/log/
+ssh-honeypot/ssh_host_rsa_key
+https-proxy/certs/
+*.tar.gz
+*.zip

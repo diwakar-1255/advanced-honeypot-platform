@@ -1,0 +1,459 @@
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+import psycopg2
+import psycopg2.extras
+import os
+import hashlib
+
+app = FastAPI(title="Professional Honeypot SOC API")
+
+DB_CONFIG = {
+    "dbname": os.getenv("POSTGRES_DB", "honeypotdb"),
+    "user": os.getenv("POSTGRES_USER", "honeypot"),
+    "password": os.getenv("POSTGRES_PASSWORD", "honeypotpass"),
+    "host": os.getenv("POSTGRES_HOST", "postgres"),
+    "port": os.getenv("POSTGRES_PORT", "5432"),
+}
+
+SEVERITY_RANK = {
+    "Low": 1,
+    "Medium": 2,
+    "High": 3,
+    "Critical": 4
+}
+
+ALERT_THRESHOLD = os.getenv("ALERT_MIN_SEVERITY", "Medium")
+
+
+class HoneypotEvent(BaseModel):
+    source_ip: str
+    service: str
+    event_type: str
+    source_port: Optional[int] = None
+    destination_port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    command: Optional[str] = None
+    method: Optional[str] = None
+    path: Optional[str] = None
+    user_agent: Optional[str] = None
+    payload: Optional[str] = None
+    attack_type: Optional[str] = None
+    risk_score: int = 0
+    severity: str = "Low"
+    raw_log: Optional[Dict[str, Any]] = None
+
+
+def get_conn():
+    return psycopg2.connect(**DB_CONFIG)
+
+
+def severity_from_score(score: int) -> str:
+    if score >= 81:
+        return "Critical"
+    if score >= 61:
+        return "High"
+    if score >= 31:
+        return "Medium"
+    return "Low"
+
+
+def normalize_severity(event: HoneypotEvent) -> str:
+    calculated = severity_from_score(event.risk_score)
+    if SEVERITY_RANK.get(calculated, 1) > SEVERITY_RANK.get(event.severity, 1):
+        return calculated
+    return event.severity
+
+
+def map_mitre(attack_type: Optional[str], event_type: Optional[str]) -> str:
+    attack_type = attack_type or ""
+    event_type = event_type or ""
+
+    mapping = {
+        "Credential Attack": "T1110 - Brute Force",
+        "FTP Login Attempt": "T1110 - Brute Force",
+        "FTP Probe": "T1046 - Network Service Discovery",
+        "SQL Injection": "T1190 - Exploit Public-Facing Application",
+        "XSS": "T1190 - Exploit Public-Facing Application",
+        "Path Traversal": "T1190 - Exploit Public-Facing Application",
+        "Command Injection": "T1059 - Command and Scripting Interpreter",
+        "Scanner": "T1595 - Active Scanning",
+        "Sensitive File Access Attempt": "T1005 - Data from Local System",
+        "File Upload Attempt": "T1105 - Ingress Tool Transfer",
+        "Web Probe": "T1595 - Active Scanning",
+    }
+
+    if attack_type in mapping:
+        return mapping[attack_type]
+
+    if "login" in event_type.lower():
+        return "T1110 - Brute Force"
+
+    return "Unmapped"
+
+
+def recommendation_for(event: HoneypotEvent, severity: str) -> str:
+    attack_type = event.attack_type or "Unknown"
+    service = event.service
+
+    if attack_type in ["SQL Injection", "XSS", "Path Traversal", "Command Injection"]:
+        return (
+            "Review web application logs, validate input handling, check WAF rules, "
+            "and monitor the source IP for repeated exploitation attempts."
+        )
+
+    if attack_type in ["Credential Attack", "FTP Login Attempt"]:
+        return (
+            "Monitor repeated login attempts, enforce account lockout policies, "
+            "review brute-force indicators, and block the source IP if repeated."
+        )
+
+    if attack_type == "File Upload Attempt":
+        return (
+            "Treat this as high risk. Inspect uploaded file metadata in an isolated lab, "
+            "block the source IP, and check for web shell or malware upload behavior."
+        )
+
+    if attack_type == "Sensitive File Access Attempt":
+        return (
+            "Check whether the attacker attempted to access backup, configuration, "
+            "or credential files. Ensure sensitive files are not publicly exposed."
+        )
+
+    if attack_type == "Scanner":
+        return (
+            "Classify as reconnaissance. Monitor for follow-up exploitation attempts "
+            "from the same IP, ASN, or user-agent."
+        )
+
+    if severity in ["High", "Critical"]:
+        return (
+            "Investigate source IP, review related events, check firewall logs, "
+            "and consider temporary blocking if activity continues."
+        )
+
+    return "Store event for monitoring and correlate with future attacker activity."
+
+
+def alert_title(event: HoneypotEvent, severity: str) -> str:
+    attack_type = event.attack_type or event.event_type
+    return f"{severity} {event.service} Alert: {attack_type}"
+
+
+def build_fingerprint(event: HoneypotEvent) -> str:
+    base = "|".join([
+        event.source_ip or "",
+        event.service or "",
+        event.attack_type or "",
+        event.event_type or "",
+        event.username or "",
+        event.path or "",
+    ])
+    return hashlib.sha256(base.encode()).hexdigest()[:24]
+
+
+def build_description(event: HoneypotEvent, severity: str, mitre: str) -> str:
+    parts = [
+        f"Source IP: {event.source_ip}",
+        f"Service: {event.service}",
+        f"Event Type: {event.event_type}",
+        f"Attack Type: {event.attack_type or 'Unknown'}",
+        f"Risk Score: {event.risk_score}",
+        f"Severity: {severity}",
+        f"MITRE: {mitre}",
+    ]
+
+    if event.username:
+        parts.append(f"Username: {event.username}")
+
+    if event.password:
+        parts.append(f"Password Captured: {event.password}")
+
+    if event.command:
+        parts.append(f"Command: {event.command}")
+
+    if event.path:
+        parts.append(f"Path: {event.path}")
+
+    if event.user_agent:
+        parts.append(f"User-Agent: {event.user_agent}")
+
+    if event.payload:
+        parts.append(f"Payload: {event.payload[:500]}")
+
+    return "\n".join(parts)
+
+
+def update_attacker(conn, event: HoneypotEvent, severity: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO attackers (
+                source_ip, first_seen, last_seen, total_events, risk_score, severity
+            )
+            VALUES (%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, %s, %s)
+            ON CONFLICT (source_ip)
+            DO UPDATE SET
+                last_seen = CURRENT_TIMESTAMP,
+                total_events = attackers.total_events + 1,
+                risk_score = GREATEST(attackers.risk_score, EXCLUDED.risk_score),
+                severity = CASE
+                    WHEN GREATEST(attackers.risk_score, EXCLUDED.risk_score) >= 81 THEN 'Critical'
+                    WHEN GREATEST(attackers.risk_score, EXCLUDED.risk_score) >= 61 THEN 'High'
+                    WHEN GREATEST(attackers.risk_score, EXCLUDED.risk_score) >= 31 THEN 'Medium'
+                    ELSE 'Low'
+                END;
+            """,
+            (event.source_ip, event.risk_score, severity)
+        )
+
+
+def insert_event(conn, event: HoneypotEvent, severity: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO events (
+                source_ip, service, event_type, source_port, destination_port,
+                username, password, command, method, path, user_agent, payload,
+                attack_type, risk_score, severity, raw_log
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                event.source_ip,
+                event.service,
+                event.event_type,
+                event.source_port,
+                event.destination_port,
+                event.username,
+                event.password,
+                event.command,
+                event.method,
+                event.path,
+                event.user_agent,
+                event.payload,
+                event.attack_type,
+                event.risk_score,
+                severity,
+                psycopg2.extras.Json(event.raw_log or {})
+            )
+        )
+        return cur.fetchone()[0]
+
+
+def should_create_alert(severity: str) -> bool:
+    return SEVERITY_RANK.get(severity, 1) >= SEVERITY_RANK.get(ALERT_THRESHOLD, 2)
+
+
+def upsert_alert(conn, event: HoneypotEvent, severity: str):
+    if not should_create_alert(severity):
+        return None
+
+    mitre = map_mitre(event.attack_type, event.event_type)
+    recommendation = recommendation_for(event, severity)
+    title = alert_title(event, severity)
+    description = build_description(event, severity, mitre)
+    fingerprint = build_fingerprint(event)
+    incident_id = "INC-" + fingerprint[:10].upper()
+
+    raw_context = {
+        "source_ip": event.source_ip,
+        "service": event.service,
+        "event_type": event.event_type,
+        "attack_type": event.attack_type,
+        "risk_score": event.risk_score,
+        "severity": severity,
+        "username": event.username,
+        "path": event.path,
+        "user_agent": event.user_agent,
+        "payload": event.payload,
+        "command": event.command,
+    }
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO alerts (
+                source_ip, title, severity, risk_score, description, status,
+                incident_id, alert_type, service, event_type, attack_type,
+                recommendation, mitre_technique, fingerprint, occurrence_count,
+                updated_at, raw_context
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, 'open',
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, 1,
+                CURRENT_TIMESTAMP, %s
+            )
+            ON CONFLICT (fingerprint)
+            DO UPDATE SET
+                occurrence_count = alerts.occurrence_count + 1,
+                risk_score = GREATEST(alerts.risk_score, EXCLUDED.risk_score),
+                severity = EXCLUDED.severity,
+                description = EXCLUDED.description,
+                recommendation = EXCLUDED.recommendation,
+                updated_at = CURRENT_TIMESTAMP,
+                raw_context = EXCLUDED.raw_context
+            RETURNING id, incident_id, occurrence_count;
+            """,
+            (
+                event.source_ip,
+                title,
+                severity,
+                event.risk_score,
+                description,
+                incident_id,
+                event.attack_type or event.event_type,
+                event.service,
+                event.event_type,
+                event.attack_type,
+                recommendation,
+                mitre,
+                fingerprint,
+                psycopg2.extras.Json(raw_context)
+            )
+        )
+        return cur.fetchone()
+
+
+@app.get("/")
+def health():
+    return {
+        "status": "ok",
+        "service": "professional-honeypot-soc-api",
+        "alert_threshold": ALERT_THRESHOLD
+    }
+
+
+@app.post("/events")
+def receive_event(event: HoneypotEvent):
+    severity = normalize_severity(event)
+
+    conn = get_conn()
+    try:
+        update_attacker(conn, event, severity)
+        event_db_id = insert_event(conn, event, severity)
+        alert_info = upsert_alert(conn, event, severity)
+        conn.commit()
+
+        return {
+            "status": "stored",
+            "event_id": event_db_id,
+            "source_ip": event.source_ip,
+            "service": event.service,
+            "attack_type": event.attack_type,
+            "risk_score": event.risk_score,
+            "severity": severity,
+            "alert_created_or_updated": alert_info is not None,
+            "alert": {
+                "id": alert_info[0],
+                "incident_id": alert_info[1],
+                "occurrence_count": alert_info[2],
+            } if alert_info else None
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/stats")
+def stats():
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM events;")
+            total_events = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM attackers;")
+            total_attackers = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM alerts;")
+            total_alerts = cur.fetchone()[0]
+
+            cur.execute("SELECT service, COUNT(*) FROM events GROUP BY service ORDER BY COUNT(*) DESC;")
+            by_service = cur.fetchall()
+
+            cur.execute("SELECT severity, COUNT(*) FROM alerts GROUP BY severity ORDER BY COUNT(*) DESC;")
+            alerts_by_severity = cur.fetchall()
+
+        return {
+            "total_events": total_events,
+            "total_attackers": total_attackers,
+            "total_alerts": total_alerts,
+            "by_service": by_service,
+            "alerts_by_severity": alerts_by_severity
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/events/recent")
+def recent_events(limit: int = Query(20, ge=1, le=100)):
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, source_ip, service, event_type, attack_type,
+                       username, path, user_agent, risk_score, severity, timestamp
+                FROM events
+                ORDER BY id DESC
+                LIMIT %s;
+                """,
+                (limit,)
+            )
+            return {"events": cur.fetchall()}
+    finally:
+        conn.close()
+
+
+@app.get("/alerts")
+def alerts(limit: int = Query(20, ge=1, le=100), status: str = "open"):
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, incident_id, source_ip, title, severity, risk_score,
+                       service, event_type, attack_type, mitre_technique,
+                       recommendation, occurrence_count, status,
+                       created_at, updated_at
+                FROM alerts
+                WHERE status = %s
+                ORDER BY
+                    CASE severity
+                        WHEN 'Critical' THEN 4
+                        WHEN 'High' THEN 3
+                        WHEN 'Medium' THEN 2
+                        ELSE 1
+                    END DESC,
+                    updated_at DESC
+                LIMIT %s;
+                """,
+                (status, limit)
+            )
+            return {"alerts": cur.fetchall()}
+    finally:
+        conn.close()
+
+
+@app.get("/attackers")
+def attackers(limit: int = Query(20, ge=1, le=100)):
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT source_ip, country, city, isp, asn,
+                       first_seen, last_seen, total_events,
+                       risk_score, severity
+                FROM attackers
+                ORDER BY risk_score DESC, total_events DESC, last_seen DESC
+                LIMIT %s;
+                """,
+                (limit,)
+            )
+            return {"attackers": cur.fetchall()}
+    finally:
+        conn.close()
