@@ -35,7 +35,6 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # 
 
-# The platform collects login attempts, commands, file access attempts, upload attempts, web attack payloads and reconnaissance activity. Captured events are forwarded to a central FastAPI service, stored in PostgreSQL, enriched with attacker intelligence, scored by risk level and visualized in Grafana. High-risk incidents can also trigger email alerts.
 
 # 
 
@@ -85,7 +84,6 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # \* Email alerting with duplicate suppression
 
-# \* Grafana SOC dashboard
 
 # 
 
@@ -119,7 +117,6 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # &#x20;       v
 
-# Grafana Dashboard + Email Alerts
 
 # ```
 
@@ -147,7 +144,6 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # | PostgreSQL        |        5432 | Event and alert storage      |
 
-# | Grafana           |        3000 | SOC dashboard                |
 
 # 
 
@@ -249,7 +245,6 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # 
 
-# Grafana Dashboard:
 
 # 
 
@@ -261,16 +256,10 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # 
 
-# Default Grafana credentials:
 
 # 
 
 # ```text
-
-# Username: admin
-
-# Password: admin
-
 # ```
 
 # 
@@ -541,5 +530,4 @@ FTP Honeypot:    ftp 52.237.90.251 2121
 
 # Developed by \*\*diwakar-1255\*\* as an advanced cybersecurity honeypot and SOC monitoring project.
 
-# 
-
+#
