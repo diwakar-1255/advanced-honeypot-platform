@@ -36,3 +36,17 @@ docker-compose.local.backup.yml
 # Python cache
 __pycache__/
 *.pyc
+
+# Local Grafana dashboard helper scripts
+add_geo_panels.py
+add_honeytoken_access_panels.py
+add_incident_panels.py
+add_malware_panels.py
+add_mitre_panels.py
+add_reputation_panels.py
+add_ssh_session_panels.py
+create_dashboard_direct.py
+fix_country_city_panels.py
+fix_grafana_dashboard.py
+force_working_grafana_dashboard.py
+recreate_grafana_dashboard.py
