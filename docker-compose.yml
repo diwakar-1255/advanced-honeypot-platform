@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: honeypotdb
       POSTGRES_USER: honeypot
-      POSTGRES_PASSWORD: honeypotpass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data

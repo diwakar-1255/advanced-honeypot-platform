@@ -50,3 +50,7 @@ fix_country_city_panels.py
 fix_grafana_dashboard.py
 force_working_grafana_dashboard.py
 recreate_grafana_dashboard.py
+
+# Local backup files
+*.backup.*
+*.backup
