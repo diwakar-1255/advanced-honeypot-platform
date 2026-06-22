@@ -955,6 +955,54 @@ async def catch_all(request: Request, path: str):
     text = f"{full_path} {request.url.query} {request.headers.get('user-agent', '')}"
     attack_type = detect_attack(text)
 
+    web_honeytokens = {
+        "/backup/customer_database_backup_2026.sql": {
+            "asset": "customer_database_backup_2026.sql",
+            "sensitivity": "High",
+            "attack_type": "Sensitive File Access Attempt",
+            "response": "-- NexaCloud Enterprise Database Backup\\n-- Access denied: privileged backup archive.\\n"
+        },
+        "/devops/.env.production": {
+            "asset": ".env.production",
+            "sensitivity": "Critical",
+            "attack_type": "Sensitive File Access Attempt",
+            "response": "APP_ENV=production\\nDB_HOST=internal-db.nexacloud.local\\nDB_USER=readonly_service\\nDB_PASSWORD=REDACTED\\nJWT_SECRET=REDACTED\\n"
+        },
+        "/cloud/aws_credentials_backup.txt": {
+            "asset": "aws_credentials_backup.txt",
+            "sensitivity": "Critical",
+            "attack_type": "Sensitive File Access Attempt",
+            "response": "[production-backup]\\naws_access_key_id=REDACTED\\naws_secret_access_key=REDACTED\\nregion=ap-south-1\\n"
+        },
+        "/admin/password_reset_list.txt": {
+            "asset": "password_reset_list.txt",
+            "sensitivity": "Critical",
+            "attack_type": "Credential Attack",
+            "response": "Access denied. This file is restricted to identity administrators.\\n"
+        },
+        "/finance/payment_gateway_keys.txt": {
+            "asset": "payment_gateway_keys.txt",
+            "sensitivity": "Critical",
+            "attack_type": "Sensitive File Access Attempt",
+            "response": "Payment gateway key vault access denied. Contact security administrator.\\n"
+        }
+    }
+
+    if full_path in web_honeytokens:
+        token = web_honeytokens[full_path]
+        send_event(
+            request,
+            "Web Honeytoken Access",
+            token["attack_type"],
+            payload={
+                "path": full_path,
+                "asset": token["asset"],
+                "sensitivity": token["sensitivity"],
+                "query": request.url.query
+            }
+        )
+        return PlainTextResponse(token["response"], status_code=403)
+
     send_event(
         request,
         "Suspicious Web Request",
