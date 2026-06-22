@@ -14,3 +14,25 @@ https-proxy/certs/
 *.zip
 *.bak
 *.bak
+
+# Sensitive / local files
+.env
+*.pem
+*.key
+
+# Generated reports and backups
+honeypot_backups/
+daily_soc_reports/
+daily_soc_report_test_output.txt
+*.sql.gz
+
+# Uploaded/malware sample storage
+malware_samples_storage/
+
+# Local backups
+*.bak
+docker-compose.local.backup.yml
+
+# Python cache
+__pycache__/
+*.pyc
