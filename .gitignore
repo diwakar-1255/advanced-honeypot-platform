@@ -89,3 +89,4 @@ malware_samples_storage/
 soc_alert_engine.log
 grafana_dashboard_backup_*.json
 enterprise_backup.log
+soc_alert_notifier.log
