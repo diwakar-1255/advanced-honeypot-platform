@@ -86,3 +86,5 @@ id_rsa.pub
 honeypot_backups/
 daily_soc_reports/
 malware_samples_storage/
+soc_alert_engine.log
+grafana_dashboard_backup_*.json
