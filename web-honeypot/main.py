@@ -5,7 +5,9 @@ import os
 import json
 import re
 import urllib.request
+from collections import defaultdict, deque
 import random
+import time
 
 app = FastAPI(
     title="NexaCloud Enterprise Platform",
@@ -14,6 +16,7 @@ app = FastAPI(
 )
 
 API_URL = os.getenv("CENTRAL_API_URL", "http://api:8000/events")
+HONEYPOT_API_TOKEN = os.getenv("HONEYPOT_API_TOKEN", "")
 
 
 # -----------------------------
@@ -169,10 +172,14 @@ def send_event(request: Request, event_type: str, attack_type: str, username=Non
     }
 
     try:
+        headers = {"Content-Type": "application/json"}
+        if HONEYPOT_API_TOKEN:
+            headers["X-Honeypot-Token"] = HONEYPOT_API_TOKEN
+
         req = urllib.request.Request(
             API_URL,
             data=json.dumps(event).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         urllib.request.urlopen(req, timeout=3)
@@ -250,6 +257,63 @@ async def web_honeytoken_detector(request: Request, call_next):
 
     return await call_next(request)
 # END WEB HONEYTOKEN MIDDLEWARE
+
+# BEGIN WEB RATE LIMITING
+WEB_RATE_WINDOW_SECONDS = int(os.getenv("WEB_RATE_WINDOW_SECONDS", "60"))
+WEB_RATE_MAX_REQUESTS = int(os.getenv("WEB_RATE_MAX_REQUESTS", "60"))
+WEB_RATE_LIMIT_LOG_INTERVAL = int(os.getenv("WEB_RATE_LIMIT_LOG_INTERVAL", "60"))
+
+_web_rate_hits = defaultdict(deque)
+_web_rate_last_log = {}
+
+@app.middleware("http")
+async def web_rate_limiter(request: Request, call_next):
+    path = request.url.path
+
+    # Always allow honeytoken paths to log as high-value deception events.
+    try:
+        if path in WEB_HONEYTOKENS:
+            return await call_next(request)
+    except NameError:
+        pass
+
+    ip = client_ip(request)
+    now = time.time()
+    hits = _web_rate_hits[ip]
+
+    while hits and now - hits[0] > WEB_RATE_WINDOW_SECONDS:
+        hits.popleft()
+
+    hits.append(now)
+
+    if len(hits) > WEB_RATE_MAX_REQUESTS:
+        last_log = _web_rate_last_log.get(ip, 0)
+
+        # Save DB space: log rate-limit event once per minute per IP.
+        if now - last_log > WEB_RATE_LIMIT_LOG_INTERVAL:
+            _web_rate_last_log[ip] = now
+            send_event(
+                request,
+                "Web Rate Limited",
+                "Scanner",
+                payload={
+                    "path": path,
+                    "requests_in_window": len(hits),
+                    "window_seconds": WEB_RATE_WINDOW_SECONDS,
+                    "limit": WEB_RATE_MAX_REQUESTS
+                }
+            )
+
+        return PlainTextResponse(
+            "Too Many Requests\n",
+            status_code=429,
+            headers={"Retry-After": str(WEB_RATE_WINDOW_SECONDS)}
+        )
+
+    return await call_next(request)
+# END WEB RATE LIMITING
+
+
 
 # -----------------------------
 # Realistic Production Layout

@@ -10,6 +10,14 @@ from collections import defaultdict
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
+HONEYPOT_API_TOKEN = os.getenv("HONEYPOT_API_TOKEN", "")
+
+def honeypot_auth_headers():
+    headers = {"Content-Type": "application/json"}
+    if HONEYPOT_API_TOKEN:
+        headers["X-Honeypot-Token"] = HONEYPOT_API_TOKEN
+    return headers
+
 
 
 API_URL = os.getenv("CENTRAL_API_URL", "http://api:8000/events")
@@ -158,7 +166,7 @@ def send_event(handler, event_type, username=None, password=None, command=None, 
         req = urllib.request.Request(
             API_URL,
             data=json.dumps(event).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=honeypot_auth_headers(),
             method="POST"
         )
         urllib.request.urlopen(req, timeout=4)

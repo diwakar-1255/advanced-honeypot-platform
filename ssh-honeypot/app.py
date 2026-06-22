@@ -11,6 +11,14 @@ from collections import defaultdict
 
 import paramiko
 from paramiko import RSAKey, ServerInterface, AUTH_SUCCESSFUL, AUTH_FAILED, OPEN_SUCCEEDED
+HONEYPOT_API_TOKEN = os.getenv("HONEYPOT_API_TOKEN", "")
+
+def honeypot_auth_headers():
+    headers = {"Content-Type": "application/json"}
+    if HONEYPOT_API_TOKEN:
+        headers["X-Honeypot-Token"] = HONEYPOT_API_TOKEN
+    return headers
+
 
 
 API_URL = os.getenv("CENTRAL_API_URL", "http://api:8000/events")
@@ -216,7 +224,7 @@ def send_event(
         req = urllib.request.Request(
             API_URL,
             data=json.dumps(event).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=honeypot_auth_headers(),
             method="POST",
         )
         urllib.request.urlopen(req, timeout=4)

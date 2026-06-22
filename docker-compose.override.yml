@@ -1,0 +1,64 @@
+services:
+  api:
+    environment:
+      HONEYPOT_API_TOKEN: ${HONEYPOT_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  web-honeypot:
+    environment:
+      HONEYPOT_API_TOKEN: ${HONEYPOT_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  ssh-honeypot:
+    environment:
+      HONEYPOT_API_TOKEN: ${HONEYPOT_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.create_connection(('localhost',2222),3); s.close()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  ftp-honeypot:
+    environment:
+      HONEYPOT_API_TOKEN: ${HONEYPOT_API_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.create_connection(('localhost',2121),3); s.close()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  postgres:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honeypot -d honeypotdb"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  grafana:
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  nginx-https:
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s

@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Query
+from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import psycopg2
@@ -109,6 +110,31 @@ def ensure_schema_once():
     ensure_schema()
     _SCHEMA_READY = True
 
+
+
+# BEGIN HONEYPOT API TOKEN AUTH
+HONEYPOT_API_TOKEN = os.getenv("HONEYPOT_API_TOKEN", "")
+
+if not HONEYPOT_API_TOKEN:
+    raise RuntimeError("HONEYPOT_API_TOKEN is not set")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "honeypot-api"}
+
+@app.middleware("http")
+async def honeypot_api_token_auth(request: Request, call_next):
+    if request.url.path == "/events" and request.method.upper() == "POST":
+        supplied_token = request.headers.get("X-Honeypot-Token", "")
+        if supplied_token != HONEYPOT_API_TOKEN:
+            return JSONResponse(
+                {"detail": "Unauthorized event source"},
+                status_code=401
+            )
+
+    return await call_next(request)
+# END HONEYPOT API TOKEN AUTH
 
 @app.on_event("startup")
 def startup_check():
