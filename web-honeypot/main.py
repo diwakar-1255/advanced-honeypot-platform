@@ -995,3 +995,69 @@ async def catch_all(request: Request, path: str):
 </div>
 """
     return HTMLResponse(layout("404 Not Found", body), status_code=404)
+
+@app.get("/backup/customer_database_backup_2026.sql", response_class=PlainTextResponse)
+async def fake_customer_backup(request: Request):
+    send_event(
+        request,
+        "Web Honeytoken Access",
+        "Sensitive File Access Attempt",
+        payload={"asset": "customer_database_backup_2026.sql", "sensitivity": "High"}
+    )
+    return """-- NexaCloud Enterprise Database Backup
+-- Export Date: 2026-06-22
+-- Access denied: backup archive requires privileged credentials.
+"""
+
+@app.get("/devops/.env.production", response_class=PlainTextResponse)
+async def fake_env_production(request: Request):
+    send_event(
+        request,
+        "Web Honeytoken Access",
+        "Sensitive File Access Attempt",
+        payload={"asset": ".env.production", "sensitivity": "Critical"}
+    )
+    return """APP_ENV=production
+DB_HOST=internal-db.nexacloud.local
+DB_USER=readonly_service
+DB_PASSWORD=REDACTED
+JWT_SECRET=REDACTED
+"""
+
+@app.get("/cloud/aws_credentials_backup.txt", response_class=PlainTextResponse)
+async def fake_aws_credentials(request: Request):
+    send_event(
+        request,
+        "Web Honeytoken Access",
+        "Sensitive File Access Attempt",
+        payload={"asset": "aws_credentials_backup.txt", "sensitivity": "Critical"}
+    )
+    return """[production-backup]
+aws_access_key_id=REDACTED
+aws_secret_access_key=REDACTED
+region=ap-south-1
+"""
+
+@app.get("/admin/password_reset_list.txt", response_class=PlainTextResponse)
+async def fake_password_reset_list(request: Request):
+    send_event(
+        request,
+        "Web Honeytoken Access",
+        "Credential Attack",
+        payload={"asset": "password_reset_list.txt", "sensitivity": "Critical"}
+    )
+    return """Access denied.
+This file is restricted to identity administrators.
+"""
+
+@app.get("/finance/payment_gateway_keys.txt", response_class=PlainTextResponse)
+async def fake_payment_keys(request: Request):
+    send_event(
+        request,
+        "Web Honeytoken Access",
+        "Sensitive File Access Attempt",
+        payload={"asset": "payment_gateway_keys.txt", "sensitivity": "Critical"}
+    )
+    return """Payment gateway key vault access denied.
+Contact security administrator.
+"""
