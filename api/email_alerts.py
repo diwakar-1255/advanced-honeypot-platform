@@ -77,7 +77,7 @@ def build_email_message(
         lines.append(f"Username: {event.username}")
 
     if event.password:
-        lines.append(f"Password Captured: {event.password}")
+        lines.append("Password Captured: ****")
 
     if event.path:
         lines.append(f"Path: {event.path}")

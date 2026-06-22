@@ -14,10 +14,14 @@ from email_alerts import send_honeypot_email_alert
 
 app = FastAPI(title="Professional Honeypot SOC API with GeoIP Enrichment")
 
+
+if not os.getenv("POSTGRES_PASSWORD"):
+    raise RuntimeError("POSTGRES_PASSWORD is not set")
+
 DB_CONFIG = {
     "dbname": os.getenv("POSTGRES_DB", "honeypotdb"),
     "user": os.getenv("POSTGRES_USER", "honeypot"),
-    "password": os.getenv("POSTGRES_PASSWORD", "honeypotpass"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
     "host": os.getenv("POSTGRES_HOST", "postgres"),
     "port": os.getenv("POSTGRES_PORT", "5432"),
 }
@@ -554,7 +558,7 @@ def build_description(event: HoneypotEvent, severity: str, mitre: str, geo: Dict
         parts.append(f"Username: {event.username}")
 
     if event.password:
-        parts.append(f"Password Captured: {event.password}")
+        parts.append("Password Captured: ****")
 
     if event.command:
         parts.append(f"Command: {event.command}")

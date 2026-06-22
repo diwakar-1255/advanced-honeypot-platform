@@ -13,7 +13,11 @@ https-proxy/certs/
 *.tar.gz
 *.zip
 *.bak
+*.backup
+*.backup.*
 *.bak
+*.backup
+*.backup.*
 
 # Sensitive / local files
 .env
@@ -31,6 +35,8 @@ malware_samples_storage/
 
 # Local backups
 *.bak
+*.backup
+*.backup.*
 docker-compose.local.backup.yml
 
 # Python cache
@@ -54,3 +60,29 @@ recreate_grafana_dashboard.py
 # Local backup files
 *.backup.*
 *.backup
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+*password*
+*secret*
+*credential*
+*token*
+
+# Backups / dumps
+*.sql.gz
+*.dump
+*.bak
+*.backup
+*.backup.*
+honeypot_backups/
+daily_soc_reports/
+malware_samples_storage/

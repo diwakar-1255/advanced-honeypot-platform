@@ -5,7 +5,9 @@ import urllib.parse
 
 GRAFANA_URL = "http://localhost:3000"
 USERNAME = "admin"
-PASSWORD = "@#Diwa1255@#"
+PASSWORD = os.getenv("GRAFANA_ADMIN_PASSWORD", "")
+if not PASSWORD:
+    raise SystemExit("GRAFANA_ADMIN_PASSWORD environment variable is not set")
 DATASOURCE_NAME = "grafana-postgresql-datasource-1"
 
 auth = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
