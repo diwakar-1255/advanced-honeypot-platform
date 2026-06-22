@@ -5,14 +5,19 @@ import os
 import json
 import re
 import urllib.request
+import random
 
-app = FastAPI(title="Advanced Enterprise HTTPS Honeypot")
+app = FastAPI(
+    title="NexaCloud Enterprise Platform",
+    docs_url=None,
+    redoc_url=None
+)
 
 API_URL = os.getenv("CENTRAL_API_URL", "http://api:8000/events")
 
 
 # -----------------------------
-# Utility functions
+# Request / Detection Helpers
 # -----------------------------
 
 def client_ip(request: Request):
@@ -37,7 +42,7 @@ def service_name(request: Request):
 
 def dest_port(request: Request):
     proto = request.headers.get("x-forwarded-proto", "http")
-    return 8443 if proto == "https" else 8080
+    return 443 if proto == "https" else 80
 
 
 def detect_attack(text: str):
@@ -60,6 +65,7 @@ def detect_attack(text: str):
             r"onerror=",
             r"onload=",
             r"alert\(",
+            r"document.cookie",
         ],
         "Path Traversal": [
             r"\.\./",
@@ -77,6 +83,7 @@ def detect_attack(text: str):
             r"curl ",
             r"bash -i",
             r"nc ",
+            r"python -c",
         ],
         "Scanner": [
             r"sqlmap",
@@ -88,6 +95,8 @@ def detect_attack(text: str):
             r"dirbuster",
             r"nessus",
             r"acunetix",
+            r"zgrab",
+            r"shodan",
         ],
         "Sensitive File Access Attempt": [
             r"\.env",
@@ -99,6 +108,16 @@ def detect_attack(text: str):
             r"id_rsa",
             r"\.git",
             r"phpmyadmin",
+            r"adminer",
+            r"server-status",
+        ],
+        "Remote Code Execution Attempt": [
+            r"phpinfo",
+            r"eval\(",
+            r"base64_decode",
+            r"cmd=",
+            r"exec=",
+            r"shell",
         ],
     }
 
@@ -112,13 +131,14 @@ def detect_attack(text: str):
 
 def severity_score(attack_type: str):
     scores = {
-        "SQL Injection": ("High", 70),
+        "SQL Injection": ("High", 75),
         "XSS": ("Medium", 55),
         "Path Traversal": ("High", 75),
-        "Command Injection": ("Critical", 90),
-        "Scanner": ("Medium", 45),
-        "Sensitive File Access Attempt": ("High", 70),
-        "Credential Attack": ("Medium", 50),
+        "Command Injection": ("Critical", 95),
+        "Remote Code Execution Attempt": ("Critical", 95),
+        "Scanner": ("Medium", 50),
+        "Sensitive File Access Attempt": ("High", 80),
+        "Credential Attack": ("Medium", 60),
         "Reconnaissance": ("Low", 25),
     }
     return scores.get(attack_type, ("Low", 20))
@@ -160,11 +180,25 @@ def send_event(request: Request, event_type: str, attack_type: str, username=Non
         print("Failed to send event:", e)
 
 
+@app.middleware("http")
+async def production_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Server"] = "NexaCloud-Edge"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 # -----------------------------
-# Website design
+# Realistic Production Layout
 # -----------------------------
 
 def layout(title: str, body: str):
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -172,26 +206,28 @@ def layout(title: str, body: str):
 <meta charset="UTF-8">
 <title>{title} | NexaCloud Enterprise</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+<meta name="description" content="NexaCloud Enterprise secure cloud, identity, backup and compliance platform.">
+<link rel="icon" href="/assets/favicon.ico">
 <style>
 * {{
     box-sizing: border-box;
-    font-family: Inter, Arial, Helvetica, sans-serif;
 }}
 
 body {{
     margin: 0;
-    background: #f5f7fb;
-    color: #172033;
+    font-family: Inter, Segoe UI, Arial, sans-serif;
+    background: #f4f7fb;
+    color: #142033;
 }}
 
 .topbar {{
     background: #020617;
     color: #cbd5e1;
-    padding: 8px 8%;
+    padding: 9px 8%;
     font-size: 13px;
     display: flex;
     justify-content: space-between;
+    gap: 15px;
 }}
 
 header {{
@@ -200,8 +236,8 @@ header {{
     padding: 18px 8%;
     position: sticky;
     top: 0;
-    z-index: 10;
-    box-shadow: 0 5px 20px rgba(0,0,0,0.25);
+    z-index: 50;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.22);
 }}
 
 nav {{
@@ -211,9 +247,9 @@ nav {{
 }}
 
 .logo {{
-    font-size: 24px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
+    font-size: 25px;
+    font-weight: 900;
+    letter-spacing: .4px;
 }}
 
 .logo span {{
@@ -223,8 +259,9 @@ nav {{
 nav a {{
     color: #e2e8f0;
     text-decoration: none;
-    margin-left: 24px;
+    margin-left: 22px;
     font-size: 14px;
+    font-weight: 600;
 }}
 
 nav a:hover {{
@@ -233,76 +270,83 @@ nav a:hover {{
 
 .hero {{
     background:
-        radial-gradient(circle at top right, rgba(56,189,248,0.35), transparent 30%),
-        linear-gradient(135deg, #0f172a, #1e3a8a 60%, #020617);
+        radial-gradient(circle at top right, rgba(56,189,248,.35), transparent 32%),
+        radial-gradient(circle at bottom left, rgba(34,197,94,.22), transparent 28%),
+        linear-gradient(135deg, #0f172a, #1e3a8a 58%, #020617);
     color: white;
     padding: 90px 8%;
 }}
 
 .hero-grid {{
     display: grid;
-    grid-template-columns: 1.3fr 0.7fr;
-    gap: 40px;
+    grid-template-columns: 1.25fr .75fr;
+    gap: 42px;
     align-items: center;
 }}
 
 .hero h1 {{
-    font-size: 52px;
-    line-height: 1.1;
-    max-width: 780px;
+    font-size: 54px;
+    line-height: 1.08;
     margin: 0 0 20px;
+    max-width: 850px;
 }}
 
 .hero p {{
     font-size: 18px;
-    line-height: 1.7;
+    line-height: 1.75;
     color: #dbeafe;
-    max-width: 680px;
+    max-width: 720px;
 }}
 
 .btn {{
     display: inline-block;
-    margin-top: 24px;
+    margin-top: 22px;
+    margin-right: 12px;
     background: #38bdf8;
     color: #020617;
     padding: 13px 24px;
     border-radius: 10px;
-    font-weight: 800;
+    font-weight: 900;
     text-decoration: none;
 }}
 
 .btn-dark {{
     background: #0f172a;
     color: white;
+    border: 1px solid #475569;
 }}
 
 .security-card {{
-    background: rgba(255,255,255,0.10);
-    border: 1px solid rgba(255,255,255,0.20);
-    border-radius: 20px;
-    padding: 24px;
-    backdrop-filter: blur(8px);
+    background: rgba(255,255,255,.11);
+    border: 1px solid rgba(255,255,255,.22);
+    border-radius: 22px;
+    padding: 26px;
+    backdrop-filter: blur(10px);
 }}
 
 .metric {{
     display: flex;
     justify-content: space-between;
     padding: 14px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.15);
+    border-bottom: 1px solid rgba(255,255,255,.15);
+}}
+
+.metric strong {{
+    color: #86efac;
 }}
 
 .container {{
-    padding: 55px 8%;
+    padding: 58px 8%;
 }}
 
 .section-title {{
-    font-size: 32px;
-    margin-bottom: 10px;
+    font-size: 34px;
+    margin-bottom: 8px;
 }}
 
 .muted {{
     color: #64748b;
-    line-height: 1.6;
+    line-height: 1.65;
 }}
 
 .cards {{
@@ -316,45 +360,52 @@ nav a:hover {{
     background: white;
     padding: 26px;
     border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 12px 34px rgba(15,23,42,.08);
     border: 1px solid #e2e8f0;
 }}
 
 .card h3 {{
-    color: #1d4ed8;
     margin-top: 0;
+    color: #1d4ed8;
+}}
+
+.badge {{
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: #e0f2fe;
+    color: #075985;
+    font-weight: 800;
 }}
 
 .login-box {{
-    max-width: 420px;
+    max-width: 450px;
     margin: 70px auto;
     background: white;
-    padding: 34px;
-    border-radius: 18px;
-    box-shadow: 0 10px 35px rgba(15, 23, 42, 0.15);
-}}
-
-.login-box h2 {{
-    margin-top: 0;
+    padding: 36px;
+    border-radius: 20px;
+    box-shadow: 0 14px 40px rgba(15,23,42,.15);
 }}
 
 input {{
     width: 100%;
-    padding: 13px;
+    padding: 14px;
     margin: 10px 0;
-    border-radius: 10px;
+    border-radius: 11px;
     border: 1px solid #cbd5e1;
+    font-size: 15px;
 }}
 
 button {{
     width: 100%;
-    padding: 13px;
+    padding: 14px;
     margin-top: 12px;
     background: #1d4ed8;
     color: white;
     border: none;
-    border-radius: 10px;
-    font-weight: bold;
+    border-radius: 11px;
+    font-weight: 900;
     cursor: pointer;
 }}
 
@@ -362,8 +413,8 @@ button {{
     background: #fff7ed;
     color: #9a3412;
     padding: 14px;
-    border-radius: 10px;
-    margin-top: 15px;
+    border-radius: 11px;
+    margin-top: 16px;
     font-size: 14px;
 }}
 
@@ -378,7 +429,7 @@ table {{
     background: white;
     border-radius: 16px;
     overflow: hidden;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 12px 34px rgba(15,23,42,.08);
 }}
 
 th, td {{
@@ -394,33 +445,42 @@ th {{
 
 .status-ok {{
     color: #16a34a;
-    font-weight: bold;
+    font-weight: 900;
 }}
 
 .status-warn {{
     color: #f59e0b;
-    font-weight: bold;
+    font-weight: 900;
 }}
 
 .status-danger {{
     color: #dc2626;
-    font-weight: bold;
+    font-weight: 900;
+}}
+
+pre, code {{
+    background: #0f172a;
+    color: #dbeafe;
+    padding: 12px;
+    border-radius: 10px;
+    display: block;
+    overflow-x: auto;
 }}
 
 footer {{
     background: #020617;
     color: #94a3b8;
-    padding: 30px 8%;
+    padding: 34px 8%;
     font-size: 14px;
 }}
 
-@media(max-width: 800px) {{
+@media(max-width: 850px) {{
     .hero-grid {{
         grid-template-columns: 1fr;
     }}
 
     .hero h1 {{
-        font-size: 36px;
+        font-size: 38px;
     }}
 
     nav {{
@@ -431,15 +491,18 @@ footer {{
         display: inline-block;
         margin: 10px 10px 0 0;
     }}
+
+    .topbar {{
+        display: block;
+    }}
 }}
 </style>
 </head>
 
 <body>
-
 <div class="topbar">
-    <div>Enterprise Security Platform | Region: India-South</div>
-    <div>Status: Operational | Support: 24/7</div>
+    <div>Enterprise Cloud Platform | Region: India-South | Build: 2026.06</div>
+    <div>Status: Operational | Last sync: {now}</div>
 </div>
 
 <header>
@@ -461,8 +524,8 @@ footer {{
 
 <footer>
     © 2026 NexaCloud Enterprise Systems. Secure cloud, identity, backup and compliance platform.
+    <br>Compliance: ISO 27001-ready | SOC monitoring enabled | Audit trail active
 </footer>
-
 </body>
 </html>
 """
@@ -480,46 +543,51 @@ async def home(request: Request):
 <section class="hero">
     <div class="hero-grid">
         <div>
-            <h1>Secure Cloud Infrastructure for Enterprise Operations</h1>
+            <span class="badge">Enterprise Security Platform</span>
+            <h1>Secure cloud operations for modern enterprises.</h1>
             <p>
                 NexaCloud helps organizations protect identities, monitor access,
-                manage cloud backups, and secure business-critical APIs through
-                a unified enterprise platform.
+                manage encrypted backups, secure APIs and maintain compliance visibility
+                across business-critical infrastructure.
             </p>
             <a class="btn" href="/login">Access Client Portal</a>
-            <a class="btn btn-dark" href="/solutions">View Solutions</a>
+            <a class="btn btn-dark" href="/solutions">Explore Solutions</a>
         </div>
 
         <div class="security-card">
             <h3>Live Platform Overview</h3>
             <div class="metric"><span>Client Portal</span><strong>Online</strong></div>
             <div class="metric"><span>API Gateway</span><strong>Online</strong></div>
-            <div class="metric"><span>Backup Region</span><strong>Active</strong></div>
+            <div class="metric"><span>Backup Vault</span><strong>Active</strong></div>
             <div class="metric"><span>Security Monitoring</span><strong>Enabled</strong></div>
+            <div class="metric"><span>Audit Logging</span><strong>Enabled</strong></div>
         </div>
     </div>
 </section>
 
 <section class="container">
-    <h2 class="section-title">Enterprise Services</h2>
-    <p class="muted">A secure platform built for cloud operations, identity management, backups and compliance monitoring.</p>
+    <h2 class="section-title">Production-grade enterprise services</h2>
+    <p class="muted">
+        A unified platform for cloud infrastructure, identity protection,
+        backup operations and compliance monitoring.
+    </p>
 
     <div class="cards">
         <div class="card">
             <h3>Identity Security</h3>
-            <p>Protect privileged users, administrator accounts and client portal access.</p>
+            <p>Protect privileged users, administrator accounts and client portal access using MFA-ready workflows.</p>
         </div>
         <div class="card">
             <h3>Cloud Backup</h3>
-            <p>Encrypted backup vaults, retention policies and recovery workflows.</p>
+            <p>Encrypted backup vaults, retention policies, recovery workflows and audit-ready reporting.</p>
         </div>
         <div class="card">
             <h3>API Gateway</h3>
-            <p>Secure business APIs with access control, keys and audit logging.</p>
+            <p>Secure business APIs with token-based authentication, access policies and monitoring.</p>
         </div>
         <div class="card">
-            <h3>Threat Monitoring</h3>
-            <p>Real-time visibility into suspicious access and abnormal login behavior.</p>
+            <h3>Compliance Monitoring</h3>
+            <p>Centralized event visibility for operations, security reviews and management reporting.</p>
         </div>
     </div>
 </section>
@@ -543,7 +611,7 @@ async def login_page(request: Request):
     </form>
 
     <div class="notice">
-        MFA is required for administrator accounts. All access attempts are logged.
+        MFA is required for administrator accounts. All authentication attempts are logged.
     </div>
 </div>
 """
@@ -582,6 +650,34 @@ async def login_submit(request: Request, username: str = Form(...), password: st
     return HTMLResponse(layout("Login Failed", body), status_code=401)
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin(request: Request):
+    text = f"/admin {request.headers.get('user-agent', '')}"
+    attack_type = detect_attack(text)
+    if attack_type == "Reconnaissance":
+        attack_type = "Scanner"
+
+    send_event(request, "Admin Console Access Attempt", attack_type)
+
+    body = """
+<div class="login-box">
+    <h2>Administrator Console</h2>
+    <p class="muted">Restricted access for internal administrators only.</p>
+
+    <form method="post" action="/login">
+        <input name="username" placeholder="Admin username" required>
+        <input name="password" type="password" placeholder="Password" required>
+        <button type="submit">Continue</button>
+    </form>
+
+    <div class="notice">
+        Warning: Administrative access is monitored and protected by MFA.
+    </div>
+</div>
+"""
+    return HTMLResponse(layout("Admin Console", body))
+
+
 @app.get("/solutions", response_class=HTMLResponse)
 async def solutions(request: Request):
     send_event(request, "Solutions Page Visit", "Reconnaissance")
@@ -589,7 +685,7 @@ async def solutions(request: Request):
     body = """
 <section class="container">
     <h2 class="section-title">Solutions</h2>
-    <p class="muted">Security-focused infrastructure for cloud-first organizations.</p>
+    <p class="muted">Security-focused infrastructure services for cloud-first organizations.</p>
 
     <div class="cards">
         <div class="card">
@@ -598,11 +694,15 @@ async def solutions(request: Request):
         </div>
         <div class="card">
             <h3>Compliance Logging</h3>
-            <p>Centralized logs for authentication, administrative actions and API usage.</p>
+            <p>Centralized logs for authentication, administrative actions, API usage and backup activity.</p>
         </div>
         <div class="card">
             <h3>Disaster Recovery</h3>
-            <p>Encrypted recovery points, backup status and restoration verification.</p>
+            <p>Encrypted recovery points, backup status, restore validation and service continuity dashboards.</p>
+        </div>
+        <div class="card">
+            <h3>Secure API Operations</h3>
+            <p>Token-based API access with rate limiting, gateway monitoring and audit-ready traces.</p>
         </div>
     </div>
 </section>
@@ -622,17 +722,17 @@ async def pricing(request: Request):
     <div class="cards">
         <div class="card">
             <h3>Starter</h3>
-            <p>Identity monitoring and basic dashboard access.</p>
+            <p>Identity monitoring, dashboard access and basic audit events.</p>
             <h2>₹2,999/month</h2>
         </div>
         <div class="card">
             <h3>Business</h3>
-            <p>Backup management, API access, audit logs and alerts.</p>
+            <p>Backup management, API access, audit logs, alerts and compliance reporting.</p>
             <h2>₹9,999/month</h2>
         </div>
         <div class="card">
             <h3>Enterprise</h3>
-            <p>Dedicated support, custom integrations and advanced monitoring.</p>
+            <p>Dedicated support, custom integrations, security operations and advanced monitoring.</p>
             <h2>Contact Sales</h2>
         </div>
     </div>
@@ -645,9 +745,11 @@ async def pricing(request: Request):
 async def status(request: Request):
     send_event(request, "Status Page Visit", "Reconnaissance")
 
-    body = """
+    body = f"""
 <section class="container">
     <h2 class="section-title">System Status</h2>
+    <p class="muted">Live service status for NexaCloud Enterprise platform.</p>
+
     <table>
         <tr>
             <th>Service</th>
@@ -659,25 +761,25 @@ async def status(request: Request):
             <td>Client Portal</td>
             <td class="status-ok">Operational</td>
             <td>India-South</td>
-            <td>Just now</td>
+            <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td>
         </tr>
         <tr>
             <td>API Gateway</td>
             <td class="status-ok">Operational</td>
             <td>Global</td>
-            <td>Just now</td>
+            <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td>
         </tr>
         <tr>
             <td>Backup Storage</td>
             <td class="status-warn">Maintenance Window</td>
             <td>Asia</td>
-            <td>10 minutes ago</td>
+            <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td>
         </tr>
         <tr>
             <td>Admin Console</td>
             <td class="status-ok">Operational</td>
             <td>Private</td>
-            <td>Just now</td>
+            <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td>
         </tr>
     </table>
 </section>
@@ -710,45 +812,20 @@ async def docs(request: Request):
             <p>View backup status and restoration events.</p>
             <code>GET /api/v1/backups</code>
         </div>
+        <div class="card">
+            <h3>Audit API</h3>
+            <p>Query administrative actions and compliance audit history.</p>
+            <code>GET /api/v1/audit/events</code>
+        </div>
     </div>
 </section>
 """
     return HTMLResponse(layout("Docs", body))
 
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin(request: Request):
-    text = f"/admin {request.headers.get('user-agent', '')}"
-    attack_type = detect_attack(text)
-
-    if attack_type == "Reconnaissance":
-        attack_type = "Scanner"
-
-    send_event(request, "Admin Console Access Attempt", attack_type)
-
-    body = """
-<div class="login-box">
-    <h2>Administrator Console</h2>
-    <p class="muted">Restricted access for internal administrators only.</p>
-
-    <form method="post" action="/login">
-        <input name="username" placeholder="Admin username" required>
-        <input name="password" type="password" placeholder="Password" required>
-        <button type="submit">Continue</button>
-    </form>
-
-    <div class="notice">
-        Warning: Administrative access is monitored and protected by MFA.
-    </div>
-</div>
-"""
-    return HTMLResponse(layout("Admin Console", body))
-
-
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots(request: Request):
     send_event(request, "Robots File Access", "Reconnaissance")
-
     return """User-agent: *
 Disallow: /admin
 Disallow: /backup
@@ -756,19 +833,21 @@ Disallow: /api/v1/internal
 Disallow: /config
 Disallow: /.env
 Disallow: /.git
+Disallow: /database
 """
 
 
 @app.get("/sitemap.xml", response_class=PlainTextResponse)
 async def sitemap(request: Request):
     send_event(request, "Sitemap Access", "Reconnaissance")
-
     return """<?xml version="1.0" encoding="UTF-8"?>
 <urlset>
-  <url><loc>https://localhost/</loc></url>
-  <url><loc>https://localhost/login</loc></url>
-  <url><loc>https://localhost/solutions</loc></url>
-  <url><loc>https://localhost/status</loc></url>
+  <url><loc>https://nexacloud.local/</loc></url>
+  <url><loc>https://nexacloud.local/login</loc></url>
+  <url><loc>https://nexacloud.local/solutions</loc></url>
+  <url><loc>https://nexacloud.local/pricing</loc></url>
+  <url><loc>https://nexacloud.local/status</loc></url>
+  <url><loc>https://nexacloud.local/docs</loc></url>
 </urlset>
 """
 
@@ -776,17 +855,52 @@ async def sitemap(request: Request):
 @app.get("/.well-known/security.txt", response_class=PlainTextResponse)
 async def security_txt(request: Request):
     send_event(request, "Security TXT Access", "Reconnaissance")
-
     return """Contact: security@nexacloud.local
-Policy: https://localhost/security-policy
+Policy: https://nexacloud.local/security-policy
 Preferred-Languages: en
+Expires: 2026-12-31T23:59:59Z
 """
+
+
+@app.get("/api/v1/health")
+async def api_health(request: Request):
+    send_event(request, "API Health Endpoint Access", "Reconnaissance")
+    return JSONResponse({
+        "status": "ok",
+        "region": "india-south",
+        "service": "nexacloud-api-gateway",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    })
+
+
+@app.post("/api/v1/auth/token")
+async def api_token(request: Request):
+    body = await request.body()
+    text = body.decode(errors="ignore")
+    attack_type = detect_attack(text)
+    if attack_type == "Reconnaissance":
+        attack_type = "Credential Attack"
+
+    send_event(
+        request,
+        "API Token Request",
+        attack_type,
+        payload={"body": text[:500]}
+    )
+
+    return JSONResponse(
+        {
+            "error": "invalid_client",
+            "message": "Client authentication failed",
+            "status": 401,
+        },
+        status_code=401,
+    )
 
 
 @app.get("/api/v1/users")
 async def api_users(request: Request):
     send_event(request, "API Users Endpoint Access", "Reconnaissance")
-
     return JSONResponse(
         {
             "error": "Unauthorized",
@@ -800,7 +914,6 @@ async def api_users(request: Request):
 @app.get("/api/v1/backups")
 async def api_backups(request: Request):
     send_event(request, "API Backups Endpoint Access", "Reconnaissance")
-
     return JSONResponse(
         {
             "error": "Forbidden",
@@ -809,6 +922,31 @@ async def api_backups(request: Request):
         },
         status_code=403,
     )
+
+
+@app.get("/api/v1/audit/events")
+async def api_audit_events(request: Request):
+    send_event(request, "Audit API Access Attempt", "Reconnaissance")
+    return JSONResponse(
+        {
+            "error": "Forbidden",
+            "message": "Audit API requires administrative privileges",
+            "status": 403,
+        },
+        status_code=403,
+    )
+
+
+@app.get("/assets/app.js", response_class=PlainTextResponse)
+async def app_js(request: Request):
+    send_event(request, "Static JS Access", "Reconnaissance")
+    return """console.log("NexaCloud Enterprise Portal loaded");"""
+
+
+@app.get("/assets/main.css", response_class=PlainTextResponse)
+async def main_css(request: Request):
+    send_event(request, "Static CSS Access", "Reconnaissance")
+    return """/* NexaCloud Enterprise production stylesheet */"""
 
 
 @app.get("/{path:path}", response_class=HTMLResponse)
@@ -836,6 +974,8 @@ async def catch_all(request: Request, path: str):
         "phpmyadmin",
         "server-status",
         "adminer",
+        "debug",
+        "actuator",
     ]
 
     if any(item in full_path.lower() for item in sensitive):
